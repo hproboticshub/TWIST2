@@ -348,10 +348,11 @@ class StateMachine:
                 print(f"[EMERGENCY STOP] pkill returned code {result.returncode}")
 
             # Also try to kill the specific server script directly as backup
-            result2 = subprocess.run(['pkill', '-f', 'server_low_level_g1_real_future.py'], 
+            # pattern matches both server_low_level_g1_real.py and server_low_level_g1_real_future.py
+            result2 = subprocess.run(['pkill', '-f', 'server_low_level_g1_real'],
                                    capture_output=True, text=True, timeout=5)
             if result2.returncode == 0:
-                print("[EMERGENCY STOP] Successfully killed server_low_level_g1_real_future.py process")
+                print("[EMERGENCY STOP] Successfully killed server_low_level_g1_real process")
             else:
                 print(f"[EMERGENCY STOP] pkill for server script returned code {result2.returncode}")
                 
@@ -750,6 +751,10 @@ class XRobotTeleopToRobot:
                 if smplx_data is not None:
                     qpos, current_retarget_obs = self.process_retargeting(smplx_data)
                     self.update_visualization(qpos, smplx_data, viewer)
+                elif time.time() - getattr(self, "_last_no_body_warn", 0.0) > 2.0:
+                    # without body data, teleop silently sends the default pose -> make it visible
+                    self._last_no_body_warn = time.time()
+                    print("[WARN] No PICO body tracking data (check Motion Trackers / Full body mode / headset worn). Sending default pose.")
                 
                 # Handle state transitions
                 self.handle_state_transitions(current_retarget_obs)

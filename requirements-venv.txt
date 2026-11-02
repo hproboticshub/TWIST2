@@ -1,0 +1,26 @@
+# Deployment / teleop dependencies for the Python 3.12 venv (no conda, no isaacgym).
+# Versions tested on Ubuntu 24.04, CPU-only (no NVIDIA GPU).
+# torch is installed separately from the CPU index (see README).
+numpy==2.5.4
+scipy==1.18.1
+mujoco==3.17.0
+mink==1.4.0
+onnx==1.23.2
+onnxruntime==1.31.1
+redis[hiredis]==8.1.0
+rich==15.0.0
+termcolor==3.3.0
+tqdm==4.70.1
+pyyaml==6.0.3
+matplotlib==3.11.2
+opencv-python==5.0.0.93
+imageio[ffmpeg]==2.38.1
+loop-rate-limiters==1.2.0
+dill==0.4.1
+zmq
+pyttsx3==2.99
+customtkinter==6.0.0
+# build tools for the unitree_interface and xrobotoolkit_sdk bindings
+pybind11==3.1.0
+setuptools
+wheel

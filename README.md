@@ -21,6 +21,133 @@ By Yanjie Ze, Siheng Zhao, Weizhuo Wang, Angjoo Kanazawa†, Rocky Duan†, Piet
 
 
 
+# HP Robotics fork: setup with a Python venv (no conda, no Isaac Gym)
+
+This fork runs **full-body teleoperation of the Unitree G1 with a PICO 4 (Ultra) + 2 PICO Motion Trackers**, in sim (`sim2sim`) and on the real robot (`sim2real`), using a single Python **venv** instead of the two conda environments of the original instructions below.
+
+Tested on **Ubuntu 24.04, Python 3.12, CPU only** (no NVIDIA GPU needed: the provided ONNX policy takes ~0.15 ms per step on CPU).
+
+What is different from upstream:
+- One venv (`twist2/`, Python 3.12) holds everything: the low-level controller, GMR retargeting and the PICO SDK.
+- **Isaac Gym is not needed** for deployment/teleop (only for training). `server_motion_lib.py` no longer requires it.
+- Policies run on CPU by default (`DEVICE=cuda` to use a GPU).
+- `sim2real.sh` forces the CycloneDDS bundled with `unitree_sdk2` (fixes `free(): invalid pointer` when ROS 2 is sourced).
+- `sim2sim.sh` / `sim2real.sh` write the default standing pose to Redis before starting (`deploy_real/set_default_pose.py`).
+- The teleop prints `[WARN] No PICO body tracking data` when the PICO is not streaming body data (before, it silently sent the default pose).
+- The teleop emergency stop now really kills `server_low_level_g1_real.py`.
+- Hands: only Unitree Dex3 is supported (`--use_hand`); with BrainCo hands leave it disabled (body teleop works, hands stay still).
+
+## 1. Folder layout
+
+Clone everything side by side (the scripts expect `unitree_sdk2_twist2` next to `TWIST2`):
+```bash
+mkdir -p ~/git_projects && cd ~/git_projects
+git clone git@github.com:hproboticshub/TWIST2.git
+git clone https://github.com/YanjieZe/GMR.git
+git clone https://github.com/YanjieZe/unitree_sdk2.git unitree_sdk2_twist2
+git clone https://github.com/YanjieZe/XRoboToolkit-PC-Service-Pybind.git
+```
+
+## 2. Python venv
+
+Requires [uv](https://docs.astral.sh/uv/) (or use `python3 -m venv` + `pip`).
+```bash
+cd ~/git_projects/TWIST2
+uv venv --python 3.12 twist2
+source twist2/bin/activate
+
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install -r requirements-venv.txt
+uv pip install -e ../GMR -e ./pose
+```
+
+## 3. Redis
+
+```bash
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+```
+With everything running on the laptop, the default config (listen on `localhost`) is enough. Only open it to the network if another machine (e.g. the robot's onboard computer) must connect; in that case prefer binding to the robot network only (e.g. `bind 127.0.0.1 192.168.123.99` in `/etc/redis/redis.conf`), since `protected-mode no` exposes Redis without a password.
+
+## 4. PICO (XRoboToolkit)
+
+1. **PC service**: install the `.deb` from [XRoboToolkit-PC-Service releases](https://github.com/XR-Robotics/XRoboToolkit-PC-Service/releases) (`XRoboToolkit_PC_Service_1.0.0_ubuntu_24.04_amd64.deb` for 24.04) with `sudo apt install ./<file>.deb`. Open the `xrobotoolkit-pc-service` app before teleoperating.
+2. **Headset app**: install `XRoboToolkit-PICO-1.1.1.apk` from [XRoboToolkit-Unity-Client releases](https://github.com/XR-Robotics/XRoboToolkit-Unity-Client/releases) (e.g. `adb install`).
+3. **Python SDK** (`xrobotoolkit_sdk`), built into the venv:
+    ```bash
+    cd ~/git_projects/XRoboToolkit-PC-Service-Pybind
+    mkdir -p tmp && git clone https://github.com/XR-Robotics/XRoboToolkit-PC-Service.git tmp/XRoboToolkit-PC-Service
+    P=tmp/XRoboToolkit-PC-Service/RoboticsService/PXREARobotSDK
+    bash $P/build.sh
+    mkdir -p lib include
+    cp $P/PXREARobotSDK.h include/ && cp -r $P/nlohmann include/ && cp $P/build/libPXREARobotSDK.so lib/
+    source ~/git_projects/TWIST2/twist2/bin/activate
+    uv pip install --no-build-isolation .
+    ```
+
+## 5. Unitree SDK Python binding (only for `sim2real`)
+
+```bash
+cd ~/git_projects/unitree_sdk2_twist2/python_binding
+source ~/git_projects/TWIST2/twist2/bin/activate
+export pybind11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+bash build.sh --sdk-path $(pwd)/..
+cp build/lib/unitree_interface.cpython-*-linux-gnu.so $(python -c "import site; print(site.getsitepackages()[0])")/
+```
+
+## 6. Check the install
+
+```bash
+cd ~/git_projects/TWIST2 && source twist2/bin/activate
+cd /tmp && python -c "import torch, mujoco, onnxruntime, redis, general_motion_retargeting, pose, xrobotoolkit_sdk, unitree_interface; print('ok')"
+```
+
+## 7. Running
+
+All scripts activate the venv themselves. Overridable variables: `DEVICE` (`cpu`/`cuda`), `NET` (robot network interface), `HUMAN_HEIGHT` (teleop, use a value slightly **below** your real height).
+
+**PICO side (every session):**
+1. Wear the 2 Motion Trackers on the ankles and calibrate them in the PICO **Motion Tracker** app (full body).
+2. Open XRoboToolkit on the headset, connect to the laptop IP (`PC Service`), enable `Head`, `Controller`, PICO Motion Tracker mode `Full body`, and `Send`.
+3. Keep the headset on your head (tracking pauses otherwise).
+
+To check that body data arrives (with `teleop.sh` closed): `python deploy_real/check_pico.py` should show `body_available=True`.
+
+**Sim (always test here first):**
+```bash
+bash sim2sim.sh     # terminal 1: G1 standing in MuJoCo
+bash teleop.sh      # terminal 2: wait for "device found"; the g1_mocap window must follow you
+```
+
+**Real robot** (robot on the gantry, laptop on the robot network, e.g. `192.168.123.99/24`, `ping 192.168.123.164` works):
+1. Unitree remote: `L2+R2` (dev mode, joints damped).
+2. `NET=<your_iface> bash sim2real.sh` → press **START** on the Unitree remote (moves to default pose) → press **A** (`Begin main TWIST2 policy loop`).
+3. `bash teleop.sh` in another terminal.
+
+Do not run `sim2sim.sh` and `sim2real.sh` together (they share Redis keys and the CPU).
+
+**PICO controls (teleop):**
+
+| Button | Action |
+|---|---|
+| A (right) | idle → teleop → pause → teleop ... (stand upright before entering teleop) |
+| X (left) | exit `teleop.sh` (interpolates back to default pose) |
+| Left stick click | emergency stop: kills `sim2real.sh` |
+| Triggers / grips | close / open hands (Dex3 only) |
+
+On the real robot, **Select** on the Unitree remote exits the policy loop. Keep someone with the Unitree remote ready.
+
+**Troubleshooting:**
+- `free(): invalid pointer` in `sim2real.sh`: `unitree_interface` is loading ROS 2's CycloneDDS; check that `UNITREE_SDK2_PATH` (default `../unitree_sdk2_twist2`) is correct.
+- `sim2real.sh` keeps printing `LowCommandWriter - No motor command available!`: it is waiting for **START** on the Unitree remote.
+- Teleop prints `[WARN] No PICO body tracking data` / robot does not follow you after pressing A: the PICO is not streaming body data (trackers not calibrated, `Full body` not selected, or headset not worn).
+- `Segmentation fault` when closing `teleop.sh` with Ctrl+C: harmless (PICO SDK teardown); exit with X instead.
+- Low FPS (~25 Hz) when running `sim2sim.sh` + `teleop.sh` on a laptop: CPU bound; the real robot setup is lighter.
+
+---
+
+Original upstream instructions follow.
+
 # Content Table
 
 - [Installation](#installation)

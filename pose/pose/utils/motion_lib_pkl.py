@@ -15,9 +15,10 @@ class FakeModule(ModuleType):
         if real:
             self.__dict__.update(real.__dict__)
 
-# Patch potentially missing modules
-sys.modules['numpy._core'] = FakeModule('numpy._core', np.core if hasattr(np, 'core') else np)
-sys.modules['numpy._core.multiarray'] = FakeModule('numpy._core.multiarray', getattr(np.core, 'multiarray', None))
+# Patch potentially missing modules (only needed on numpy 1.x; numpy 2.x already has numpy._core)
+if int(np.__version__.split('.')[0]) < 2:
+    sys.modules['numpy._core'] = FakeModule('numpy._core', np.core if hasattr(np, 'core') else np)
+    sys.modules['numpy._core.multiarray'] = FakeModule('numpy._core.multiarray', getattr(np.core, 'multiarray', None))
 
 
 def smooth(x, box_pts, device):

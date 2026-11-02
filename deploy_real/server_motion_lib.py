@@ -4,7 +4,10 @@ import time
 import redis
 import json
 import numpy as np
-import isaacgym
+try:
+    import isaacgym  # only needed to be imported before torch when isaacgym is installed
+except ImportError:
+    pass
 import torch
 from rich import print
 import os
@@ -28,7 +31,7 @@ def build_mimic_obs(
     """
     Build the mimic_obs at time-step t_step, referencing the code in MimicRunner.
     """
-    device = torch.device("cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Build times
     motion_times = torch.tensor([t_step * control_dt], device=device).unsqueeze(-1)
     obs_motion_times = tar_motion_steps * control_dt + motion_times

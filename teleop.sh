@@ -1,8 +1,9 @@
 # sudo ufw disable
 
-source ~/miniconda3/bin/activate gmr
+SCRIPT_DIR=$(dirname $(realpath $0))
+source ${SCRIPT_DIR}/twist2/bin/activate
 
-cd deploy_real
+cd ${SCRIPT_DIR}/deploy_real
 
 # this is my unitree g1's ip in wifi
 # redis_ip="192.168.110.24"
@@ -10,7 +11,7 @@ cd deploy_real
 redis_ip="localhost"
 
 # the height (empirically) should be smaller than the actual human height, due to inaccuracy of the PICO estimation.
-actual_human_height=1.6
+actual_human_height=${HUMAN_HEIGHT:-1.6}
 python xrobot_teleop_to_robot_w_hand.py --robot unitree_g1 \
              --actual_human_height $actual_human_height \
              --redis_ip $redis_ip \
